@@ -62,53 +62,135 @@ function Navbar({ user, onLogout }) {
   )
 }
 
+function Field({label, error, children}){
+  return (
+    <div>
+      {label && <div className="text-sm font-medium mb-1">{label}</div>}
+      {children}
+      {error && <div className="mt-1 text-xs text-red-600">{error}</div>}
+    </div>
+  )
+}
+
 function AuthPage({ setUser }) {
   const api = useApi()
   const [mode, setMode] = useState('login')
   const [form, setForm] = useState({
     first_name: '', last_name: '', email: '', phone: '', qualification: '', password: ''
   })
+  const [touched, setTouched] = useState({})
+  const [submitting, setSubmitting] = useState(false)
+  const [serverError, setServerError] = useState('')
+
   const qualifications = [
     'B.Tech CSE','B.Tech IT','B.Sc IT','BCA','MCA','M.Sc CS','Diploma in CS/IT'
   ]
+
+  const validators = {
+    email: (v) => v ? (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v) ? '' : 'Enter a valid email address') : 'Email is required',
+    password: (v) => v ? (v.length >= 6 ? '' : 'Password must be at least 6 characters') : 'Password is required',
+    first_name: (v) => mode==='register' ? (v && v.trim().length >= 2 ? '' : 'First name must be at least 2 characters') : '',
+    last_name: (v) => mode==='register' ? (v && v.trim().length >= 2 ? '' : 'Last name must be at least 2 characters') : '',
+    phone: (v) => mode==='register' ? (/^[0-9]{10}$/.test(v) ? '' : 'Enter a valid 10-digit phone') : '',
+    qualification: (v) => mode==='register' ? (qualifications.includes(v) ? '' : 'Select a valid IT qualification') : '',
+  }
+
+  const errors = useMemo(()=>{
+    const e = {}
+    Object.keys(validators).forEach(k=>{
+      const msg = validators[k](form[k])
+      if (msg) e[k] = msg
+    })
+    return e
+  }, [form, mode])
+
+  const canSubmit = useMemo(()=>{
+    if (mode === 'login') return !errors.email && !errors.password
+    return Object.values(errors).every(v=>!v)
+  }, [errors, mode])
+
+  const onBlur = (name) => setTouched(t=> ({...t, [name]: true}))
+
+  const update = (name, value) => {
+    setForm(f=> ({...f, [name]: value}))
+    setServerError('')
+  }
+
   const submit = async (e) => {
     e.preventDefault()
-    if (mode==='register'){
-      if (!/^[0-9]{10}$/.test(form.phone)) return alert('Enter valid 10-digit phone')
-      if (!qualifications.includes(form.qualification)) return alert('Only IT-related qualifications allowed')
-      const res = await api.post('/auth/register', {
-        first_name: form.first_name, last_name: form.last_name, email: form.email, phone: form.phone, qualification: form.qualification, password_hash: form.password
-      })
-      setUser(res.user)
-    } else {
-      const res = await api.post('/auth/login', { email: form.email, password: form.password })
-      setUser(res.user)
+    setTouched({ email: true, password: true, first_name: true, last_name: true, phone: true, qualification: true })
+    if (!canSubmit) return
+    try {
+      setSubmitting(true)
+      setServerError('')
+      if (mode==='register'){
+        const res = await api.post('/auth/register', {
+          first_name: form.first_name, last_name: form.last_name, email: form.email, phone: form.phone, qualification: form.qualification, password_hash: form.password
+        })
+        setUser(res.user)
+      } else {
+        const res = await api.post('/auth/login', { email: form.email, password: form.password })
+        setUser(res.user)
+      }
+    } catch (err) {
+      const msg = typeof err?.message === 'string' ? err.message : 'Something went wrong'
+      setServerError(msg)
+    } finally {
+      setSubmitting(false)
     }
   }
+
   return (
     <div className="max-w-md mx-auto bg-white rounded-xl shadow p-6 mt-8">
-      <div className="flex justify-center gap-4 mb-4">
-        <button onClick={()=>setMode('login')} className={`px-3 py-1 rounded ${mode==='login'?'bg-blue-600 text-white':'bg-gray-100'}`}>Login</button>
-        <button onClick={()=>setMode('register')} className={`px-3 py-1 rounded ${mode==='register'?'bg-blue-600 text-white':'bg-gray-100'}`}>Register</button>
+      <div className="flex justify-center gap-2 mb-4">
+        <button onClick={()=>{setMode('login'); setServerError('')}} className={`px-3 py-1 rounded ${mode==='login'?'bg-blue-600 text-white':'bg-gray-100'}`}>Login</button>
+        <button onClick={()=>{setMode('register'); setServerError('')}} className={`px-3 py-1 rounded ${mode==='register'?'bg-blue-600 text-white':'bg-gray-100'}`}>Register</button>
       </div>
+
+      {serverError && (
+        <div className="mb-3 rounded border border-red-200 bg-red-50 text-red-700 text-sm px-3 py-2">
+          {serverError}
+        </div>
+      )}
+
       <form onSubmit={submit} className="space-y-3">
         {mode==='register' && (
           <>
             <div className="grid grid-cols-2 gap-3">
-              <input className="input" placeholder="First name" required value={form.first_name} onChange={e=>setForm({...form, first_name:e.target.value})} />
-              <input className="input" placeholder="Last name" required value={form.last_name} onChange={e=>setForm({...form, last_name:e.target.value})} />
+              <Field label="First name" error={touched.first_name && errors.first_name}>
+                <input className="input" placeholder="First name" value={form.first_name} onChange={e=>update('first_name', e.target.value)} onBlur={()=>onBlur('first_name')} />
+              </Field>
+              <Field label="Last name" error={touched.last_name && errors.last_name}>
+                <input className="input" placeholder="Last name" value={form.last_name} onChange={e=>update('last_name', e.target.value)} onBlur={()=>onBlur('last_name')} />
+              </Field>
             </div>
-            <input className="input" placeholder="Phone (10 digits)" required value={form.phone} onChange={e=>setForm({...form, phone:e.target.value})} />
-            <select className="input" required value={form.qualification} onChange={e=>setForm({...form, qualification:e.target.value})}>
-              <option value="">Select qualification</option>
-              {qualifications.map(q=> <option key={q} value={q}>{q}</option>)}
-            </select>
+            <Field label="Phone" error={touched.phone && errors.phone}>
+              <input className="input" placeholder="10-digit phone" value={form.phone} onChange={e=>update('phone', e.target.value)} onBlur={()=>onBlur('phone')} />
+            </Field>
+            <Field label="Qualification" error={touched.qualification && errors.qualification}>
+              <select className="input" value={form.qualification} onChange={e=>update('qualification', e.target.value)} onBlur={()=>onBlur('qualification')}>
+                <option value="">Select qualification</option>
+                {qualifications.map(q=> <option key={q} value={q}>{q}</option>)}
+              </select>
+            </Field>
           </>
         )}
-        <input type="email" className="input" placeholder="Email" required value={form.email} onChange={e=>setForm({...form, email:e.target.value})} />
-        <input type="password" className="input" placeholder="Password" required minLength={6} value={form.password} onChange={e=>setForm({...form, password:e.target.value})} />
-        <button className="w-full bg-blue-600 hover:bg-blue-700 text-white rounded py-2">{mode==='login'?'Login':'Create account'}</button>
+
+        <Field label="Email" error={touched.email && errors.email}>
+          <input type="email" className="input" placeholder="Email" value={form.email} onChange={e=>update('email', e.target.value)} onBlur={()=>onBlur('email')} />
+        </Field>
+        <Field label="Password" error={touched.password && errors.password}>
+          <input type="password" className="input" placeholder="Password" value={form.password} onChange={e=>update('password', e.target.value)} onBlur={()=>onBlur('password')} />
+        </Field>
+
+        <button disabled={!canSubmit || submitting} className={`w-full text-white rounded py-2 ${submitting? 'bg-blue-400':'bg-blue-600 hover:bg-blue-700'} disabled:opacity-60 disabled:cursor-not-allowed`}>
+          {submitting ? 'Please wait…' : (mode==='login'?'Login':'Create account')}
+        </button>
       </form>
+
+      <div className="mt-3 text-xs text-gray-500">
+        Password must be at least 6 characters. Phone must be exactly 10 digits. Only IT-related qualifications are accepted.
+      </div>
     </div>
   )
 }
